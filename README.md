@@ -1,16 +1,19 @@
 # Nmap-Scripting-Engine
 
-
 **Author:** Dashane James  
-**Lab Environment:** VMware Workstation | Kali Linux | Metasploitable 2 
-**Purpose:** The goal of this repository is to use Nmap scripts for targeted vulnerability checks, bridging network scanning and vulnerability assesment.
+**Lab Environment:** VMware Workstation | Kali Linux | Metasploitable 2  
+**Purpose:** Use Nmap's built-in scripting engine to go beyond port scanning: actively probe services for misconfigurations, confirm known vulnerabilities, and in one case, demonstrate live exploitation of a critical CVE.  
 **Status:** 🔵 Completed
 
 ---
 
 ## 📋 Overview
 
-This repository documents combining the network scanning of Nmap with the task of vulnerabIlity assessments. This creates a simpler way to both scan a network and identify vulnerabilities simultaneously which is very useful for a cybersecurity analyst or penetration tester.
+A port scan tells you what's open. The Nmap Scripting Engine (NSE) tells you what's wrong with it.
+
+NSE lets you attach scripts directly to an Nmap scan that interact with open services, test for specific vulnerabilities, check configurations, and even, in select cases, attempt exploitation. This repository documents four progressively broader script scans against the same Metasploitable target used throughout this portfolio: default scripts (`-sC`), targeted service checks (`ftp-anon` and `smb-vuln*`), and a full vulnerability sweep (`--script vuln`) that produced the most significant finding of the entire week.
+
+The `--script vuln` run is where this lab lands. Running it against port 21 didn't just detect the vsftpd 2.3.4 backdoor, it triggered it. The scan returned `uid=0(root) gid=0(root)`. At that point, reconnaissance had become confirmed compromise.
 
 ---
 
@@ -19,166 +22,157 @@ This repository documents combining the network scanning of Nmap with the task o
 | Component | Details |
 |---|---|
 | Hypervisor | VMware Workstation (Host-Only Network) |
-| Attacker Machine | Kali Linux 2026.1 — `192.168.79.129` |
-| Target Machine | [Metasploitable 2] — `192.168.79.130` |
+| Attacker Machine | Kali Linux 2026.1, `192.168.79.129` |
+| Target Machine | Metasploitable 2, `192.168.79.130` |
 | Network Type | Host-Only (isolated, no internet exposure) |
-| Host OS | Windows 11 — ASUS Vivobook 14 |
+| Host OS | Windows 11, ASUS Vivobook 14 |
 
-> ⚠️ **Note:** All activity was performed in a controlled, isolated lab environment against deliberately vulnerable machines. No unauthorized access to live networks was performed.
+> ⚠️ **Note:** All activity was performed in a controlled, isolated lab environment against a deliberately vulnerable machine. No unauthorized access to live networks was performed.
 
 ---
 
 ## 🛠️ Tools Used
 
-- **Nmap** — Used for both standard scanning and running NSE (Nmap Scripting Engine) scripts to detect and, in one case, actively exploit vulnerabilities
-- **NSE (Nmap Scripting Engine)** — Ran default (`-sC`), targeted (`ftp-anon`, `smb-vuln*`), and broad (`vuln`) script categories against the target
-- **NVD (National Vulnerability Database)** — Referenced to research CVE details, CVSS scores, and attack vectors for confirmed vulnerabilities
-
----
-
-
+- **Nmap**: Used for both standard scanning and running NSE scripts to detect and, in one case, actively exploit vulnerabilities
+- **NSE (Nmap Scripting Engine)**: Ran default (`-sC`), targeted (`ftp-anon`, `smb-vuln*`), and broad (`vuln`) script categories against the target
+- **NVD (National Vulnerability Database)**: Referenced to research CVE details, CVSS scores, and attack vectors for confirmed vulnerabilities
 
 ---
 
 ## 🔬 Tasks / Assessments Performed
 
-### 1. Run default scripts against key Metasploitable ports.
+### 1. Run default scripts against key Metasploitable ports
 
-For this task I ran a Nmap -sC script scan on the target. By doing this it runs a default set of scripts that go beyond basic port scanning to actually probe and interact with the services running on open ports, collecting much more valuable information than a simple open/closed" or "version number" result. 
+The `-sC` flag runs Nmap's default script set, a curated collection that goes beyond basic port scanning to actively interact with each service. Default scripts test things like default credentials, anonymous access, and known configuration weaknesses without requiring you to name a specific script.
 
-# Command used
+```bash
 sudo nmap -sC -Pn --disable-arp-ping -n -p 21,22,80,445 192.168.79.130
-
-
-# Output
--sC runs Nmap's default script set, which is a specific collection of scripts that go beyond basic sanning to actively interact with each service, testing things like default credentials and known weak configurations. Against Metasploitable, this revealed several notable results on ports 21,22,80, and 445.
+```
 
 <img width="325" height="260" alt="Screenshot 2026-07-25 165902" src="https://github.com/user-attachments/assets/d6d7347b-8354-4f74-aefc-4dd39ccf9d6f" />
 
 <img width="326" height="257" alt="Screenshot 2026-07-25 165937" src="https://github.com/user-attachments/assets/b4b80872-4c9e-4b54-a036-fe37bfeb5d13" />
 
-**Findings:**
+**Finding:**
 
-Port 21 (FTP): Anonymous logins are allowed, meaning no credentials are required to access the FTP server. The scan also confirmed both control and data communications are transmitted in plain text.
+The default scan returned meaningful results across all four ports.
 
-Port 22 (SSH): Host key fingerprints(DSA/RSA) were retrieved, useful for host verification but not a vulnerability on its own. 
+**Port 21 (FTP):** Anonymous logins allowed with no credentials required to access the server. Both the control and data channels transmit in plaintext.
 
-Port 445 (SMB): Identified as Samba 3.0.20-Debian, confirming this is a Linux/Unix based SMB rather than a Windows based SMB. The scan also flagged "message_signing: disabled (dangerous, but default), a known weakness that leaves SMB traffic vulnerable to tampering and showed the scan was able to authenticate using a guest account.
+**Port 22 (SSH):** Host key fingerprints (DSA/RSA) were retrieved, which is useful for host verification but not a vulnerability on its own.
 
-These results show that -sC surfaces real configuration weaknesses like anonymous access and disabled security features.
+**Port 445 (SMB):** Identified as Samba 3.0.20-Debian, a Linux-based SMB implementation. The scan flagged `message_signing: disabled (dangerous, but default)`, meaning SMB traffic on this host is vulnerable to tampering and man-in-the-middle attacks. It also confirmed that guest authentication was allowed.
 
+The `-sC` scan surfaced real configuration problems, anonymous FTP access and disabled SMB signing, without needing to target any specific vulnerability by name. Default scripts are a fast first look, and on this target, that first look was already revealing.
 
-### 2. Check FTP for anonymous login vulnerability
+---
 
-For this task I use a different type of command to specifically display vulnerabilities for FTP. This allows me to have a more targeted approach for researching vulnerabilities on the target machine.
+### 2. Check FTP for anonymous login
 
-# Command used
+Rather than relying on what `-sC` happened to include, I ran a targeted script to check specifically for anonymous FTP access. This approach is useful when you want to confirm one particular misconfiguration with a clean, focused output.
+
+```bash
 sudo nmap --script ftp-anon -Pn --disable-arp-ping -n -p 21 192.168.79.130
-
-
-# Output
-
-The output displays almost identically the same vulnerabilities found when running the -sC command except it trims the info down to only the indicated port 21. Results of ftp-anon script confirmed: Anonymous FTP login allowed (FTP code 230).
+```
 
 <img width="314" height="142" alt="Screenshot 2026-07-25 191012" src="https://github.com/user-attachments/assets/77048d28-0911-41be-9c80-03ae549e72fb" />
 
+**Finding:**
 
-**Findings:**
-I found that this command again confirms port 21 accepts anonymous logins with no credentials required, which is obviously a critical misconfiguration.
+The `ftp-anon` script confirmed: **Anonymous FTP login allowed (FTP code 230)**. The output was narrower than the default scan, only port 21, only the anonymous login check, but the result was the same. Anonymous access to the FTP server requires no credentials at all.
+
+This matters because it directly enables the attacker workflow: connect anonymously, browse the file system, and upload or retrieve files with no authentication barrier. Combined with the vsftpd 2.3.4 version confirmed in the Service Version Detection lab, this port represented both a misconfiguration and a critical CVE in one place.
+
+---
 
 ### 3. Run SMB vulnerability scripts against port 445
-I ran a script to search for vulnerabilities in SMB. This is another example of using scripts in Nmap to uncover vulnerabilities on specific ports on the target device.
 
+The `smb-vuln*` wildcard runs every available SMB vulnerability-check script against the target in a single command rather than requiring each one to be named individually.
 
-# Command used
+```bash
 sudo nmap --script smb-vuln* -Pn --disable-arp-ping -n -p 445 192.168.79.130
-
-# Output
-The smb-vuln* wildcard ran every available SMB vulnerability-check script against port 445. Two of those checks returned false (MS10-061 and MS10-054). This means the target is not vulnerable to those specific issues. A third script(smb-vuln-regsvc-dos) failed to execute and returned an error rather than a definitive result. 
+```
 
 <img width="323" height="257" alt="Screenshot 2026-07-25 221859" src="https://github.com/user-attachments/assets/751e88a7-650a-44d9-821b-cdcd8fa342af" />
 
+**Finding:**
 
-```
+The wildcard ran all available SMB scripts. Two returned clear results: MS10-061 and MS10-054 both came back false, the target is not vulnerable to those specific exploits. A third script (`smb-vuln-regsvc-dos`) failed to execute and returned a script error rather than a definitive result.
 
-**Findings:**
+There's an important distinction here. A `false` result means the vulnerability was tested and ruled out. A script error means the test was inconclusive, that's not a clean bill of health, it's an unresolved question. In a real assessment, inconclusive results require follow-up investigation rather than being treated as "not vulnerable."
 
-I found that not every script scan turns up a positive or definitive result. This run confirmed the target is not vulnerable to two specific known SMB exploits (MS10-061 and MS10-054), and the other script failed to execute rather than returning a clear answer. This is an important distinction: a "false" result means the vulnerability was tested and ruled out, while this script error means the test was inconclusive and shouldn't be considered safe until further investigation. 
+This run also reinforced something useful: NSE scans don't always find something dramatic. Ruling out specific known vulnerabilities is itself a meaningful output. It narrows the scope of what needs investigation.
 
+---
 
+### 4. Run the `vuln` category for a broad vulnerability sweep
 
-### 4. Run the vuln category for a broad check
-In this task, I ran a script to identify a broader range of vulnerabilities across the target network. The purpose is to run a different type of script that shows a wider range of outputs unlike the last task which showed only port specific vulnerabilities. 
+The `--script vuln` flag runs every vulnerability-detection script in Nmap's library across all open ports. This is the broadest NSE scan available, it covers dozens of scripts, runs against every open port, and produces significantly more output than any of the targeted scans above.
 
-#Command
+```bash
 sudo nmap --script vuln -Pn --disable-arp-ping -n 192.168.79.130
-
-# Output
-
-After reviewing this output I immediately noticed that this output was way more massive than any of the other vulnerability scans that I've run so far. Scripts ran against nearly every open port instead of just one. The most significant result came from port 21 because I noticed that Nmap didn't just show me the vulnerability exists it actually exploited it live and confirmed root access.
+```
 
 <img width="320" height="257" alt="Screenshot 2026-07-25 234932" src="https://github.com/user-attachments/assets/10e2682f-50a8-4eb9-ad84-b1f56f23b7ea" />
 
+**Finding:**
 
-**Findings:**
+The output was substantially larger than any previous scan, scripts ran against nearly every open port rather than just the ones I specified. The most significant result came from port 21.
 
-The Vuln script category confirmed and actively exploited the vsftpd 2.3.4 backdoor (CVE-2011-2523) on port 21, achieving root-level command execution. The script ran the shell command id through the backdoor and received uid=0(root) gid=0(root), which is definitive proof of successful remote access. This was the strongest result of any scan in this project, since it moved beyond detection into actual proof of compromise. Notably, this was one of the only scripts in the scan that performed live exploitation. Most other scripts in the "vuln" category only detect and report whether a vulnerability exists, without attempting to exploit it. However, port 21's script is a special case because the vsftpd 2.3.4 backdoor is a well documented, simple command-injection vulnerability that Nmap's script can reliably trigger and verify with a single command. Most other vulnerability scripts test for more complex or riskier conditions, like crashing a service, so they are written to stop at detection rather than attempt exploitation.
+The `ftp-vsftpd-backdoor` script didn't just detect CVE-2011-2523, it triggered the backdoor live. It ran the `id` command through the backdoor channel and received:
 
-### 5. Document every vuln NSE finds with its severity.
+```
+uid=0(root) gid=0(root) groups=0(root)
+```
 
-For this task I continued to review the vulnerability output that I received in task 4. However, this time I reviewed and  documented each vulnerability that was displayed. I then categorized them by port, service, vulnerability, NSE Script, severity, along with any other notes or important details.
+This is confirmed remote code execution with root-level privileges. No credentials, no privilege escalation steps, no additional tools. The exploit was embedded in the vsftpd 2.3.4 source code itself, and Nmap's script triggered it in a single scan.
 
+Most `vuln` category scripts only detect and report whether a vulnerability exists, they stop short of exploiting it because exploitation can crash services, generate alerts, or cause unintended consequences. The vsftpd backdoor is an exception: it's a well-documented, simple command-injection channel that can be reliably triggered and verified without destabilizing the service. That's why the script goes all the way to execution rather than stopping at detection.
 
-### Output
+The gap between "detected" and "exploited" is significant. This finding didn't need a CVE lookup or a CVSS score to communicate urgency. A root shell is the explanation.
 
-Port / Service / Vulnerability / NSE Script / Severity / Notes
+---
 
-21/tcp (FTP) - ftp-vsftpd-backdoor (CVE-2011-2523)	🔴 Critical	Live exploitation confirmed. The vulnerable vsFTPd 2.3.4 backdoor allowed remote command execution and root shell access. (CVSS 9.8)
+### 5. Document every vulnerability NSE found with its severity
 
-22/tcp (SSH) - Weak SSH cryptographic configuration - 🟡 Medium	Weak or outdated cryptographic algorithms were identified, potentially reducing the security of encrypted communications.
+After the broad scan, I reviewed the full output and catalogued every result, confirmed vulnerabilities, informational findings, inconclusive results, and confirmed-not-vulnerable checks, by port, severity, and what each result actually means.
 
-23/tcp (Telnet) - Telnet service detected	🟠 High	Telnet transmits credentials in plaintext, making usernames and passwords susceptible to interception.
+| Port/Service | Vulnerability | Severity | Notes |
+|---|---|---|---|
+| 21/tcp FTP | vsftpd 2.3.4 backdoor (CVE-2011-2523) | 🔴 Critical | Live exploitation confirmed, `uid=0(root) gid=0(root)`. CVSS 9.8. Remote code execution with no credentials. |
+| 22/tcp SSH | Weak cryptographic configuration | 🟡 Medium | Weak or outdated cipher suites identified; may reduce the security of encrypted sessions. |
+| 23/tcp Telnet | Telnet service running | 🟠 High | All session data, including credentials, transmitted in plaintext. No encryption. |
+| 80/tcp HTTP | SQL injection detected | 🟠 High | SQL injection present on web application; could allow database read, write, or destruction. |
+| 80/tcp HTTP | Slowloris DoS susceptibility | 🟡 Medium | Server appears susceptible to Slowloris-style connection exhaustion attacks. |
+| 80/tcp HTTP | HTTP TRACE method enabled | 🟢 Low | TRACE enabled; low impact on its own but useful for attacker reconnaissance and may assist cross-site tracing. |
+| 111/tcp rpcbind | RPC information disclosure | 🟢 Low | Exposes information about available RPC services, useful for attacker enumeration. |
+| 139/tcp NetBIOS/SMB | SMB information disclosure | 🟡 Medium | Host and share information visible to unauthenticated queries. |
+| 445/tcp SMB | MS10-061 | 🟢 Not Vulnerable | Script returned false, this specific exploit was tested and ruled out. |
+| 445/tcp SMB | MS10-054 | 🟢 Not Vulnerable | Script returned false, ruled out. |
+| 445/tcp SMB | smb-vuln-regsvc-dos | ⚪ Inconclusive | Script failed to complete, result is unresolved, not confirmed-safe. |
+| 3306/tcp MySQL | Version and service info disclosed | 🟡 Medium | Database version exposed, useful for identifying applicable CVEs. |
 
-80/tcp (HTTP) - Slowloris Denial-of-Service	🟡 Medium	The web server appears susceptible to the Slowloris DoS attack, which can exhaust server connections and deny service to legitimate users.
+**Finding:**
 
-80/tcp (HTTP) - HTTP TRACE method enabled	🟢 Low	TRACE is enabled, which may aid reconnaissance or cross-site tracing attacks but does not directly compromise the server.
+The full output shows why reviewing every result individually matters. A `false` on MS10-061 is a different kind of finding than the script error on `smb-vuln-regsvc-dos`, even though neither returned a confirmed vulnerability. And the vsftpd result sits in a different category entirely, not just a detected vulnerability but a confirmed exploit with proof of root access.
 
-80/tcp (HTTP) - SQL Injection vulnerability	🟠 High	SQL injection was detected and could allow attackers to retrieve, modify, or delete database information.
-
-111/tcp (rpcbind) - RPC information disclosure	🟢 Low	rpcbind exposes information about available RPC services, assisting attacker reconnaissance.
-
-139/tcp (NetBIOS/SMB) - SMB enumeration	🟡 Medium	SMB information disclosure allows attackers to gather host and share information useful for later attacks.
-
-445/tcp (SMB) - smb-vuln-ms10-061 🟢 Not Vulnerable	NSE script returned false, indicating the system is not vulnerable to MS10-061.
-
-445/tcp (SMB) - smb-vuln-ms10-054 🟢 Not Vulnerable	NSE script returned false, indicating the target is not affected by MS10-054.
-
-445/tcp (SMB) - smb-vuln-regsvc-dos	⚪ Inconclusive	The script failed to complete successfully, so the vulnerability status could not be determined.
-
-3306/tcp (MySQL) - MySQL information disclosure	🟡 Medium	Database version and service information were exposed, which may help attackers identify known exploits.
-
-443/tcp (HTTPS) - Logjam (Weak Diffie-Hellman Parameters) 🟡 Medium	Weak Diffie-Hellman parameters reduce TLS security and could allow encrypted communications to be weakened under certain attack scenarios
-
-**Findings:** 
-
-The table above consolidates all of the findings reported during the Nmap --script vuln scan and categorizes each result by severity. The most significant finding was the vsFTPd 2.3.4 backdoor (CVE-2011-2523) on port 21, which was successfully exploited to obtain root-level access, making it the only Critical vulnerability confirmed through live exploitation. Several additional weaknesses were identified, including SQL injection, Telnet running without encryption, Slowloris denial-of-service susceptibility, and weak SSH cryptographic settings, all of which increase the attack surface of the target system. The SMB vulnerability checks also demonstrated that vulnerability scans can produce different outcomes: some scripts confirmed the system was not vulnerable, while others returned inconclusive results because the checks could not be completed. Overall, the scan illustrates the importance of reviewing every NSE script result individually, as findings may represent confirmed vulnerabilities, informational issues, successful mitigations, or inconclusive tests requiring additional investigation.
+Running the broad vuln scan is not the same as understanding what it found. The output requires interpretation.
 
 ---
 
 ## 📊 Key Findings Summary
 
 | Port/Service | Tool Used | Risk Level | Notes |
-
-| 21/tcp FTP | Nmap (`vuln`, `ftp-anon`) | 🔴 Critical | vsFTPd 2.3.4 backdoor (CVE-2011-2523) — live exploitation confirmed, root access achieved |
-| 23/tcp Telnet | Nmap (`vuln`) | 🟠 High | Transmits credentials in plaintext, vulnerable to interception |
+|---|---|---|---|
+| 21/tcp FTP | Nmap (`vuln`, `ftp-anon`) | 🔴 Critical | vsftpd 2.3.4 backdoor (CVE-2011-2523), live exploitation confirmed, `uid=0(root)` returned |
+| 23/tcp Telnet | Nmap (`vuln`) | 🟠 High | Transmits credentials in plaintext; vulnerable to interception |
 | 80/tcp HTTP | Nmap (`vuln`) | 🟠 High | SQL injection vulnerability detected |
-| 80/tcp HTTP | Nmap (`vuln`) | 🟡 Medium | Susceptible to Slowloris denial-of-service attack |
+| 80/tcp HTTP | Nmap (`vuln`) | 🟡 Medium | Susceptible to Slowloris denial-of-service |
 | 445/tcp SMB | Nmap (`-sC`, `smb-vuln*`) | 🟡 Medium | Message signing disabled; guest authentication allowed |
-| 22/tcp SSH | Nmap (`vuln`) | 🟡 Medium | Weak/outdated cryptographic configuration identified |
+| 22/tcp SSH | Nmap (`vuln`) | 🟡 Medium | Weak/outdated cryptographic configuration |
 | 3306/tcp MySQL | Nmap (`vuln`) | 🟡 Medium | Database version and service info exposed |
 
 **Risk Levels:** 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low
-
 
 ---
 
@@ -186,9 +180,9 @@ The table above consolidates all of the findings reported during the Nmap --scri
 
 | Action Performed | ATT&CK Tactic | Technique ID | Technique Name |
 |---|---|---|---|
-| Default and targeted script scanning (-sC, ftp-anon, smb-vuln*) | Reconnaissance | T1595 | Active Scanning |
+| Default and targeted script scanning (`-sC`, `ftp-anon`, `smb-vuln*`) | Reconnaissance | T1595 | Active Scanning |
 | Anonymous FTP login confirmed | Initial Access | T1078 | Valid Accounts |
-| vsFTPd backdoor exploitation (root shell via `id` command) | Execution | T1059 | Command and Scripting Interpreter |
+| vsftpd backdoor exploitation, root shell via `id` command | Execution | T1059 | Command and Scripting Interpreter |
 | Root-level access confirmed post-exploitation | Privilege Escalation | T1068 | Exploitation for Privilege Escalation |
 
 ---
@@ -197,81 +191,64 @@ The table above consolidates all of the findings reported during the Nmap --scri
 
 Based on findings, the following remediations would be recommended in a real environment:
 
-1. **vsFTPd 2.3.4 backdoor (Critical)** — Immediately upgrade or replace the FTP service; this version is known to contain an intentional backdoor and should never be used in production.
-2. **Anonymous FTP login allowed** — Disable anonymous access entirely; require authenticated accounts for any FTP access.
-3. **Telnet enabled (plaintext credentials)** — Disable Telnet and replace with SSH for all remote administration.
-4. **SMB message signing disabled** — Enable SMB message signing to prevent tampering and man-in-the-middle attacks on SMB traffic.
-5. **SQL injection on port 80** — Implement input validation/parameterized queries on the web application, and consider a WAF as an additional layer of defense.
-
----
-
-## 📚 CySA+ Exam Relevance
-
-This lab directly maps to the following CompTIA CySA+ (CS0-003) exam domains:
-
-| Domain | Coverage |
-
-| Security Operations (33%) | Hands-on use of Nmap and NSE scripts to perform reconnaissance and identify live services and misconfigurations |
-| Vulnerability Management (30%) | Running vulnerability-check scripts (`smb-vuln*`, `vuln`), interpreting results, and cross-referencing CVE/CVSS data from NVD |
-| Incident Response (20%) | Recognizing confirmed exploitation (root access via vsFTPd backdoor) as evidence of active compromise |
-| Reporting & Communication (17%) | Documenting findings by severity in a structured, readable format for technical and non-technical audiences |
+1. **vsftpd 2.3.4 backdoor (Critical)**: Immediately uninstall vsftpd 2.3.4. This version contains an intentional backdoor and must never run in any environment. Replace with a patched FTP daemon or migrate to SFTP over SSH.
+2. **Anonymous FTP login allowed (High)**: Disable anonymous access in the vsftpd configuration (`anonymous_enable=NO`). All FTP sessions should require authenticated accounts.
+3. **Telnet enabled (High)**: Disable Telnet and replace with SSH for all remote administration.
+4. **SMB message signing disabled (Medium)**: Enable SMB message signing to prevent tampering and man-in-the-middle attacks. Disable guest authentication. Restrict port 445 to authorized hosts.
+5. **SQL injection on port 80 (High)**: Implement parameterized queries and input validation across all web application forms. Deploy a Web Application Firewall as an additional layer of defense.
+6. **Inconclusive NSE results**: Any script that returned a failure or error rather than a definitive result (such as `smb-vuln-regsvc-dos`) should be retested with targeted tools before being considered resolved.
 
 ---
 
 ## 🔑 Technical Notes
 
-> # Note: not all NSE vulnerability scripts behave the same way — most only detect and report (true/false), while a small number (like ftp-vsftpd-backdoor) actually attempt live exploitation. Always check script documentation or output carefully rather than assuming uniform behavior.
->
-> "Always add the -n flag to Nmap scans in this VMware environment to prevent DNS resolution hangs."]
-> 
-> -sP and -sT contradict eachother (Can't be used together because -sP means just do a ping/host-discovery sweep, skip ports entirely but -sT tells Nmap to do a full TCP connect port scan. These commands contradict eachother.)
-
 ```bash
-
-# Any important commands or workarounds
--sC
--Pn
-
-# Any important commands or workarounds
-
 # Task 1: Run default scripts (-sC) against key ports
 sudo nmap -sC -Pn --disable-arp-ping -n -p 21,22,80,445 192.168.79.130
 
-# Task 2: Check FTP for anonymous login specifically
+# Task 2: Targeted FTP anonymous login check
 sudo nmap --script ftp-anon -Pn --disable-arp-ping -n -p 21 192.168.79.130
 
-# Task 3: Run all SMB vulnerability scripts against port 445
+# Task 3: Run all SMB vulnerability scripts (wildcard) against port 445
 sudo nmap --script smb-vuln* -Pn --disable-arp-ping -n -p 445 192.168.79.130
 
-# Task 4: Run the full vuln script category across all open ports
+# Task 4: Broad vulnerability sweep across all open ports
 sudo nmap --script vuln -Pn --disable-arp-ping -n 192.168.79.130
 
-# Workaround: -p requires a value directly after it — omitting the port number
-# (e.g. "-p 192.168.79.130") causes Nmap to misinterpret the target IP as a
-# port specification. To scan all ports instead of a specific one, remove
-# the -p flag entirely rather than leaving it empty.
+# NSE behavior note: not all vulnerability scripts work the same way.
+# Most detect and report (true/false/error) without attempting exploitation.
+# A small number, like ftp-vsftpd-backdoor, go further and attempt live
+# exploitation when the vulnerability is well-documented and reliably
+# triggerable without crashing the service. Always read script output
+# carefully and don't assume uniform behavior across the vuln category.
 
-# Workaround: always use -n in this lab to prevent DNS resolution hangs,
-# since the isolated Host-Only network has no real DNS server.
+# Wildcard note: --script smb-vuln* runs every NSE script whose name
+# starts with "smb-vuln" in a single command. Useful for running an
+# entire category without listing each script individually.
 
-# Note: --script <name>* (wildcard) runs every NSE script matching that
-# name pattern — useful for running a whole category (e.g. smb-vuln*)
-# in a single command instead of specifying each script individually.
+# -p requires a port value directly after it. If you accidentally
+# write "-p" with no port, Nmap misreads the target IP as a port
+# specification. To scan all ports, drop the -p flag entirely.
+
+# Always add -n to prevent DNS resolution hangs on the isolated
+# host-only network (no real DNS server is present to answer queries).
 ```
 
 ---
 
 ## 📌 About This Project
 
-This repository is part of my broader cybersecurity portfolio demonstrating practical, hands-on vulnerability assessment skills from initial scanning through confirmed exploitation. This repository is important because here we have built up to the point of having live proof of the actual exploitation by an automated Nmap script for the CVE-2011-2523. In a past NVD task I researched this exact vulnerability with a CVSS score of 9.8 now this has come full circle and we found out how this exact vulnerability is exploited and root access was acheived. 
+This repository is the final active scanning lab in the Week 1 reconnaissance portfolio, and it's where everything from the previous labs converged into a single confirmed result.
 
+The port 21 vsftpd finding had been building across the entire week: the port was first identified on Day 1 (host discovery baseline), the vsftpd 2.3.4 version was confirmed on Day 3 (service version detection), the CVE-2011-2523 backdoor was researched and scored that same day (CVSS 9.8, Critical), and on Day 6 the NSE vuln scan triggered that backdoor and returned a root shell. A finding that started as "port 21 is open" ended as "confirmed remote code execution with root privileges." That chain, from baseline port list to live exploitation, is what this portfolio is designed to demonstrate.
 
-**Related repositories:**
-- Nmap-Host-Discovery-and-Lab-Baseline — Established a baseline of the lab network using ping sweeps and host discovery, documenting the target environment before deeper scanning began
-- Nmap-Scan-Types-SYN-vs-TCP-vs-UDP — Compared SYN, TCP connect, and UDP scan types against the target, examining differences in speed, stealth, and reliability
-- Service-Version-Detection-and-OS-Fingerprinting — Identified exact software versions on Metasploitable and researched real CVEs tied to them, including the vsFTPd backdoor later exploited in this repository
-- Wireshark-Capture-and-Analyze-Traffic — Captured and analyzed live packet traffic, including plaintext credential exposure over Telnet
-- TCPDump-CLI-Packet-Capture — Used TCPDump from the command line to capture traffic (including a live Telnet session showing plaintext credential exposure), and demonstrated saving captures to a `.pcap` file for later analysis in Wireshark
+**Related repositories (in order):**
+
+- `Nmap-Host-Discovery-and-Lab-Baseline`: Established the baseline network scan that first identified port 21 as open, the starting point for everything this lab confirmed
+- `Nmap-Scan-Types-SYN-vs-TCP-vs-UDP`: Confirmed the same port list through different scan types, including the full port scan that ensured no services were missed
+- `Service-Version-Detection-and-OS-Fingerprinting`: Identified vsftpd 2.3.4 on port 21 and researched CVE-2011-2523, the vulnerability actively exploited in this lab
+- `Wireshark-Capture-and-Analyze-Traffic`: Independently confirmed credential exposure on port 80 via HTTP, a finding that also showed up in the NSE vuln scan output
+- `TCPDump-CLI-Packet-Capture`: Captured the Telnet session data that the NSE vuln scan confirmed as a high-risk plaintext service on port 23
 
 ---
 
@@ -280,11 +257,9 @@ This repository is part of my broader cybersecurity portfolio demonstrating prac
 **Dashane James**  
 Senior Field Service Technician → Cybersecurity Analyst  
 📍 Yonkers, NY  
-🎓 B.S. Information Technology — SUNY Canton  
-🏆 CompTIA Security+ | CySA+ (In Progress)  
-🔗 GitHub Portfolio : https://github.com/Dashanejames1 |
-Zero Trust Cyber Security Brand:
-https://www.instagram.com/zerotrust_cybersecurity
+🎓 B.S. Information Technology, SUNY Canton  
+🏆 CompTIA Security+  
+🔗 [GitHub](https://github.com/Dashanejames1) | [Zero Trust Cyber Security Brand](https://www.instagram.com/zerotrust_cybersecurity)
 
 ---
 
